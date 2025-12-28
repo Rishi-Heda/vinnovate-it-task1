@@ -69,5 +69,25 @@ def delete_file(file_id: int, user_id: int, db: Session = Depends(database.get_d
 def get_user_files(user_id: int, db: Session = Depends(database.get_db)):
     user = db.query(models.User).filter(models.User.id == user_id).first()
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    return user.files
+        return []
+    
+    # helper list to store fixed data
+    results = []
+    
+    for f in user.files:
+        # We assume deduplication is active if more than 1 reference exists
+        is_dedup = False
+        if f.blob and f.blob.ref_count > 1:
+            is_dedup = True
+
+        results.append({
+            "id": f.id,
+            "filename": f.filename,
+            # We grab the size from the 'blob' relationship
+            "size_bytes": f.blob.size_bytes if f.blob else 0,
+            "upload_date": f.upload_date,
+            "is_deduplicated": is_dedup,
+            "download_count": f.download_count
+        })
+        
+    return results

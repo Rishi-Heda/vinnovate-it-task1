@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VinnoDrive - Smart Storage</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        body { background-color: #f8f9fa; }
+        .drop-zone {
+            border: 2px dashed #0d6efd;
+            border-radius: 10px;
+            padding: 30px;
+            text-align: center;
+            background-color: #e9ecef;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        .drop-zone:hover { background-color: #dee2e6; }
+        .drop-zone.dragover { background-color: #cfe2ff; border-color: #0a58ca; }
+        .stat-card { transition: transform 0.2s; }
+        .stat-card:hover { transform: translateY(-5px); }
+    </style>
+</head>
+<body>
+
+<div class="toast-container position-fixed bottom-0 end-0 p-3">
+  <div id="liveToast" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+    <div class="toast-header">
+      <strong class="me-auto" id="toastTitle">Notification</strong>
+      <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
+    </div>
+    <div class="toast-body" id="toastMessage">Action successful!</div>
+  </div>
+</div>
+
+<div class="container py-5">
+    <div class="row mb-4 align-items-center">
+        <div class="col-md-6">
+            <h1 class="text-primary"><i class="fa-solid fa-cloud"></i> VinnoDrive</h1>
+            <p class="text-muted">Smart Deduplication Storage System</p>
+        </div>
+        <div class="col-md-6 text-end">
+            <div class="input-group w-50 ms-auto">
+                <input type="number" id="userIdInput" class="form-control" placeholder="Enter User ID" value="1">
+                <button class="btn btn-primary" onclick="loadDashboard()">Load Dashboard</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="dashboard" style="display: none;">
+        
+        <div class="row mb-4">
+            <div class="col-md-4">
+                <div class="card stat-card shadow-sm h-100">
+                    <div class="card-body">
+                        <h6 class="text-muted">Storage Quota (10MB)</h6>
+                        <h3 id="storageUsed">0 MB</h3>
+                        <div class="progress mt-2" style="height: 10px;">
+                            <div id="quotaBar" class="progress-bar bg-success" role="progressbar" style="width: 0%"></div>
+                        </div>
+                        <small id="quotaText" class="text-muted">0% Used</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card stat-card shadow-sm h-100">
+                    <div class="card-body">
+                        <h6 class="text-muted">Total Savings (Deduplication)</h6>
+                        <h3 id="savingsBytes" class="text-success">0 MB</h3>
+                        <span id="savingsBadge" class="badge bg-success">0% Saved</span>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card stat-card shadow-sm h-100">
+                    <div class="card-body">
+                        <h6 class="text-muted">Original vs Actual</h6>
+                        <ul class="list-unstyled mt-2">
+                            <li><strong>Original:</strong> <span id="originalSize">0 MB</span></li>
+                            <li><strong>Actual on Disk:</strong> <span id="actualSize">0 MB</span></li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card shadow-sm mb-4">
+            <div class="card-header bg-white">
+                <h5 class="mb-0">Upload Files</h5>
+            </div>
+            <div class="card-body">
+                <div id="dropZone" class="drop-zone">
+                    <i class="fa-solid fa-cloud-arrow-up fa-3x text-primary mb-3"></i>
+                    <p class="mb-0">Drag & Drop files here or click to select</p>
+                    <input type="file" id="fileInput" hidden multiple>
+                </div>
+            </div>
+        </div>
+
+        <div class="card shadow-sm">
+            <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">My Files</h5>
+                <button class="btn btn-sm btn-outline-secondary" onclick="fetchFiles()">
+                    <i class="fa-solid fa-rotate"></i> Refresh
+                </button>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0 align-middle">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Filename</th>
+                                <th>Size</th>
+                                <th>Uploaded</th>
+                                <th>Status</th>
+                                <th>Downloads</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="fileTableBody">
+                            </tbody>
+                    </table>
+                    <div id="emptyState" class="text-center py-5 d-none">
+                        <p class="text-muted">No files found. Upload something!</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+<script>
+    const API_BASE = "http://127.0.0.1:8000"; 
+    let currentUserId = null;
+
+    // --- Toast Logic ---
+    function showToast(title, message, isError = false) {
+        const toastEl = document.getElementById('liveToast');
+        const toastTitle = document.getElementById('toastTitle');
+        const toastBody = document.getElementById('toastMessage');
+        const toastHeader = toastEl.querySelector('.toast-header');
+
+        toastTitle.innerText = title;
+        toastBody.innerText = message;
+        
+        if (isError) {
+            toastHeader.classList.remove('bg-success', 'text-white');
+            toastHeader.classList.add('bg-danger', 'text-white');
+        } else {
+            toastHeader.classList.remove('bg-danger', 'text-white');
+            toastHeader.classList.add('bg-success', 'text-white');
+        }
+
+        const toast = new bootstrap.Toast(toastEl);
+        toast.show();
+    }
+
+    async function loadDashboard() {
+        currentUserId = document.getElementById('userIdInput').value;
+        if(!currentUserId) return alert("Please enter a User ID");
+        
+        document.getElementById('dashboard').style.display = 'block';
+        await fetchStats();
+        await fetchFiles();
+    }
+
+    async function fetchStats() {
+        try {
+            const res = await fetch(`${API_BASE}/stats/${currentUserId}`);
+            if(!res.ok) throw new Error("Failed to load stats");
+            const data = await res.json();
+            
+            const toMB = (bytes) => (bytes / (1024 * 1024)).toFixed(2);
+            
+            document.getElementById('storageUsed').innerText = `${toMB(data.actual_used_bytes)} MB`;
+            document.getElementById('savingsBytes').innerText = `${toMB(data.savings_bytes)} MB`;
+            document.getElementById('originalSize').innerText = `${toMB(data.original_size_bytes)} MB`;
+            document.getElementById('actualSize').innerText = `${toMB(data.actual_used_bytes)} MB`;
+            document.getElementById('savingsBadge').innerText = `${data.savings_percentage}% Saved`;
+
+            const quotaLimit = 10 * 1024 * 1024; 
+            const pctUsed = (data.actual_used_bytes / quotaLimit) * 100;
+            const bar = document.getElementById('quotaBar');
+            bar.style.width = `${pctUsed}%`;
+            bar.className = `progress-bar ${pctUsed > 90 ? 'bg-danger' : 'bg-success'}`;
+            document.getElementById('quotaText').innerText = `${pctUsed.toFixed(1)}% of 10MB Used`;
+
+        } catch (err) { console.error(err); }
+    }
+
+    // --- FIXED FETCH FILES FUNCTION ---
+    async function fetchFiles() {
+        try {
+            console.log(`Fetching files for User ${currentUserId}...`);
+            const res = await fetch(`${API_BASE}/files/${currentUserId}`);
+            
+            if(!res.ok) {
+                console.error("Failed to fetch files endpoint. Did you add it to main.py?");
+                return;
+            }
+
+            const files = await res.json();
+            const tbody = document.getElementById('fileTableBody');
+            const emptyState = document.getElementById('emptyState');
+            
+            tbody.innerHTML = ''; // Clear previous rows
+
+            if (files.length === 0) {
+                emptyState.classList.remove('d-none'); // Show empty message
+            } else {
+                emptyState.classList.add('d-none'); // Hide empty message
+                
+                files.forEach(file => {
+                    // Badge Logic
+                    let statusBadge = file.is_deduplicated 
+                        ? `<span class="badge bg-info text-dark" title="Reference"><i class="fa-solid fa-link"></i> Deduped</span>`
+                        : `<span class="badge bg-secondary">Original</span>`;
+
+                    // Size Logic
+                    let sizeStr = (file.size_bytes / 1024).toFixed(1) + " KB";
+                    if(file.size_bytes > 1024 * 1024) sizeStr = (file.size_bytes / (1024*1024)).toFixed(2) + " MB";
+
+                    const row = `
+                        <tr>
+                            <td><i class="fa-regular fa-file me-2 text-primary"></i> ${file.filename}</td>
+                            <td>${sizeStr}</td>
+                            <td>${new Date(file.upload_date).toLocaleDateString()}</td>
+                            <td>${statusBadge}</td>
+                            <td>${file.download_count}</td>
+                            <td>
+                                <button class="btn btn-sm btn-outline-primary me-1" onclick="downloadFile(${file.id})">
+                                    <i class="fa-solid fa-download"></i>
+                                </button>
+                                <button class="btn btn-sm btn-outline-danger" onclick="deleteFile(${file.id})">
+                                    <i class="fa-solid fa-trash"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                    tbody.innerHTML += row;
+                });
+            }
+        } catch (err) { 
+            console.error("Error loading files:", err); 
+        }
+    }
+
+    // --- Upload Logic ---
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+
+    dropZone.onclick = () => fileInput.click();
+    dropZone.ondragover = (e) => { e.preventDefault(); dropZone.classList.add('dragover'); };
+    dropZone.ondragleave = () => dropZone.classList.remove('dragover');
+    
+    dropZone.ondrop = async (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('dragover');
+        if (e.dataTransfer.files.length) handleUpload(e.dataTransfer.files);
+    };
+
+    fileInput.onchange = () => {
+        if (fileInput.files.length) handleUpload(fileInput.files);
+    };
+
+    async function handleUpload(files) {
+        for (let file of files) {
+            const formData = new FormData();
+            formData.append("file", file);
+
+            try {
+                const res = await fetch(`${API_BASE}/upload/${currentUserId}`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (res.status === 429) {
+                    showToast("Error", "Rate Limit Exceeded! Slow down.", true);
+                    continue;
+                }
+                if (res.status === 413) {
+                    showToast("Error", "Storage Quota Exceeded!", true);
+                    break;
+                }
+                if (!res.ok) throw new Error("Upload failed");
+
+                const result = await res.json();
+                
+                let msg = result.is_deduplicated 
+                    ? `Uploaded "${file.name}" (Duplicate - Space Saved!)` 
+                    : `Uploaded "${file.name}" successfully!`;
+                
+                showToast("Success", msg, false);
+
+            } catch (err) {
+                console.error(err);
+                showToast("Error", `Failed to upload ${file.name}`, true);
+            }
+        }
+        await fetchStats();
+        await fetchFiles();
+        fileInput.value = ''; 
+    }
+
+    async function deleteFile(fileId) {
+        if(!confirm("Are you sure?")) return;
+        
+        try {
+            const res = await fetch(`${API_BASE}/files/${fileId}?user_id=${currentUserId}`, { method: 'DELETE' });
+            if(res.ok) {
+                showToast("Deleted", "File removed.", false);
+                await fetchStats();
+                await fetchFiles();
+            } else {
+                showToast("Error", "Failed to delete.", true);
+            }
+        } catch(err) { console.error(err); }
+    }
+
+    async function downloadFile(fileId) {
+        window.open(`${API_BASE}/download/${fileId}?user_id=${currentUserId}`, '_blank');
+        setTimeout(fetchFiles, 1000); 
+    }
+</script>
+</body>
+</html>
